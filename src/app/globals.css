@@ -1,26 +1,135 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@custom-variant dark (&:is(.dark *));
 
+/* ------------------------------------------------------------------
+   Tailwind ↔ CSS variable mapping (DO NOT TOUCH)
+------------------------------------------------------------------ */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --color-destructive: var(--destructive);
+
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* ------------------------------------------------------------------
+   🌤️ LIGHT THEME — SOFT CALM PALETTE (DEFAULT)
+   Based on:
+   #FBFBFB / #E8F9FF / #C4D9FF / #C5BAFF
+------------------------------------------------------------------ */
+:root {
+  --radius: 0.75rem;
+
+  /* Backgrounds */
+  --background: oklch(from #FBFBFB l c h);
+  --foreground: oklch(from #111827 l c h);
+
+  --card: oklch(from #FFFFFF l c h);
+  --card-foreground: oklch(from #111827 l c h);
+
+  --popover: oklch(from #FFFFFF l c h);
+  --popover-foreground: oklch(from #111827 l c h);
+
+  /* Primary (Lavender) */
+  --primary: oklch(from #C5BAFF l c h);
+  --primary-foreground: oklch(from #0B0F14 l c h);
+
+  /* Secondary (Soft Blue) */
+  --secondary: oklch(from #C4D9FF l c h);
+  --secondary-foreground: oklch(from #0B0F14 l c h);
+
+  /* Muted / subtle surfaces */
+  --muted: oklch(from #E8F9FF l c h);
+  --muted-foreground: oklch(from #475569 l c h);
+
+  --accent: oklch(from #E8F9FF l c h);
+  --accent-foreground: oklch(from #0B0F14 l c h);
+
+  --destructive: oklch(0.58 0.22 25);
+
+  /* Borders & focus */
+  --border: oklch(from #DDE6F2 l c h);
+  --input: oklch(from #DDE6F2 l c h);
+  --ring: oklch(from #C5BAFF l c h);
+}
+
+/* ------------------------------------------------------------------
+   🌙 DARK THEME — KEPT FOR LATER (Dashboard use)
+------------------------------------------------------------------ */
+.dark {
+  --background: oklch(0.18 0.02 250);
+  --foreground: oklch(0.95 0.01 250);
+
+  --card: oklch(0.22 0.02 250);
+  --card-foreground: oklch(0.95 0.01 250);
+
+  --popover: oklch(0.22 0.02 250);
+  --popover-foreground: oklch(0.95 0.01 250);
+
+  --primary: oklch(from #C5BAFF l c h);
+  --primary-foreground: oklch(0.1 0.01 250);
+
+  --secondary: oklch(0.26 0.02 250);
+  --secondary-foreground: oklch(0.95 0.01 250);
+
+  --muted: oklch(0.26 0.02 250);
+  --muted-foreground: oklch(0.7 0.02 250);
+
+  --accent: oklch(0.26 0.02 250);
+  --accent-foreground: oklch(0.95 0.01 250);
+
+  --destructive: oklch(0.55 0.2 25);
+
+  --border: oklch(0.3 0.02 250);
+  --input: oklch(0.3 0.02 250);
+  --ring: oklch(from #C5BAFF l c h);
+}
+
+/* ------------------------------------------------------------------
+   Base styles
+------------------------------------------------------------------ */
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
   }
-}
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  body {
+    @apply bg-background text-foreground;
+    letter-spacing: -0.01em;
+  }
+
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.02em;
+  }
 }
