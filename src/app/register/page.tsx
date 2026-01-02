@@ -588,7 +588,7 @@ export default function RegisterPage() {
                               }))
                             }
                             className="mt-2 w-full rounded-2xl border border-input bg-background px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-ring/30"
-                            placeholder="e.g. mehnaaz_shaik"
+                            placeholder="e.g. Vishakha"
                             autoComplete="username"
                           />
                           {!form.username ? (
