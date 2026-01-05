@@ -11,7 +11,9 @@ const API_BASE =
 /**
  * ✅ DEFAULT JSON API
  */
-export async function apiFetch(path, { method = "GET", body, token } = {}) {
+export async function apiFetch(path, options = {}) { 
+  const { method = "GET", body, token } = options;
+  
   const headers = { "Content-Type": "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
 
@@ -47,7 +49,9 @@ export async function apiFetch(path, { method = "GET", body, token } = {}) {
 /**
  * ✅ MULTIPART API
  */
-export async function apiUpload(path, { method = "POST", formData, token } = {}) {
+export async function apiUpload(path, options = {}) {
+  const { method = "POST", formData, token } = options;
+
   const headers = {};
   if (token) headers.Authorization = `Bearer ${token}`;
 

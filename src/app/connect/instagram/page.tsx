@@ -1,12 +1,12 @@
 // src/app/connect/instagram/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 
 type CallbackStatus = "processing" | "success" | "error";
 
-export default function InstagramCallbackPage() {
+function InstagramCallbackInner() {
   const searchParams = useSearchParams();
   const [status, setStatus] = useState<CallbackStatus>("processing");
   const [message, setMessage] = useState("Connecting to Instagram...");
@@ -14,11 +14,10 @@ export default function InstagramCallbackPage() {
   useEffect(() => {
     const run = async () => {
       const code = searchParams.get("code");
-      const state = searchParams.get("state"); // app_user
+      const state = searchParams.get("state");
       const error = searchParams.get("error");
       const errorDescription = searchParams.get("error_description");
 
-      // If user directly opens /connect/instagram in browser, code/state will be missing
       if (!code || !state) {
         if (error) {
           const errMsg = errorDescription || error;
@@ -29,7 +28,6 @@ export default function InstagramCallbackPage() {
           setMessage("Missing code/state from Instagram");
         }
 
-        // notify opener if any
         if (window.opener) {
           window.opener.postMessage(
             {
@@ -98,7 +96,11 @@ export default function InstagramCallbackPage() {
 
         if (window.opener) {
           window.opener.postMessage(
-            { type: "instagram_callback", success: false, error: "Network error" },
+            {
+              type: "instagram_callback",
+              success: false,
+              error: "Network error",
+            },
             "*"
           );
           setTimeout(() => window.close(), 1500);
@@ -139,5 +141,13 @@ export default function InstagramCallbackPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+export default function InstagramCallbackPage() {
+  return (
+    <Suspense fallback={<div className="p-10 text-center">Loading…</div>}>
+      <InstagramCallbackInner />
+    </Suspense>
   );
 }

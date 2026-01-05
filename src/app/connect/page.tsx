@@ -85,11 +85,14 @@ export default function ConnectPage() {
     const load = async () => {
       setLoading(true);
 
-      try {
-        // ✅ ONLY valid endpoint in your api-mapping.json
-        const data = await apiFetch("/user/profile", { token });
-        setProfile(normalizeProfile(data));
-      } catch (e: any) {
+        try {
+        const data = await apiFetch("/user/profile", {
+          method: "GET",
+          token,
+          });
+
+          setProfile(normalizeProfile(data));
+        }  catch (e: any) {
         const msg = e?.message || "";
 
         if (isAuthErrorMessage(msg)) {

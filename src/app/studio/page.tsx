@@ -1,3 +1,4 @@
+//src/app/studio/page.tsx
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -42,10 +43,17 @@ export default function StudioPage() {
   const pollRef = useRef<any>(null);
   const [lastPayload, setLastPayload] = useState<any>(null);
 
-  const [isMemeMode, setIsMemeMode] = useState<boolean>(() => {
-    const saved = localStorage.getItem("meme_mode");
-    return saved === "true";
-  });
+  const [isMemeMode, setIsMemeMode] = useState<boolean>(false);
+
+  useEffect(() => {
+    const saved =
+      typeof window !== "undefined"
+        ? localStorage.getItem("meme_mode")
+        : null;
+
+    if (saved === "true") setIsMemeMode(true);
+  }, []);
+
 
   useEffect(() => {
     return () => {

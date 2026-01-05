@@ -1,11 +1,22 @@
 import { EngagementChart } from "@/components/engagement-chart";
 
+export async function generateStaticParams() {
+  return [
+    { slug: "postingexpert" },
+    { slug: "craftingbrain" },
+    { slug: "inikola" },
+    { slug: "eyeslahes" },
+    { slug: "padmavathi-bhojnalay" },
+  ];
+}
+
 export default function BrandAnalyticsPage({
   params,
 }: {
-  params: { slug: string };
+  params?: { slug?: string };
 }) {
-  const brand = params.slug.replace("-", " ");
+  const brandSlug = params?.slug ?? "brand";
+  const brand = brandSlug.replace(/-/g, " ");
 
   return (
     <>
