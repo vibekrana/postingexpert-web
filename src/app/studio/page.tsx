@@ -1,4 +1,3 @@
-// src/app/studio/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -6,12 +5,27 @@ import { useRouter } from "next/navigation";
 import { SiteNavbar } from "@/components/site-navbar";
 import { SiteFooter } from "@/components/site-footer";
 
-// ✅ uses your src/lib/api.js
-import { apiFetch, apiUpload, API_BASE } from "@/lib/api";
+import { apiFetch, apiUpload, GATEWAY_BASE, EC2_BASE } from "@/lib/api";
 import { getToken, clearAuth } from "@/lib/auth";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 
 type Platforms = { instagram: boolean; linkedin: boolean; facebook: boolean };
+
+function isHttpsPage() {
+  if (typeof window === "undefined") return false;
+  return window.location.protocol === "https:";
+}
+
+/**
+ * ✅ CRITICAL FIX:
+ * - On HTTPS website, browser blocks HTTP calls to EC2 (Mixed Content).
+ * - So queue MUST use gateway when page is HTTPS and EC2 is http://...
+ */
+function pickQueueBase(): "gateway" | "ec2" {
+  const ec2IsHttp = EC2_BASE.startsWith("http://");
+  if (isHttpsPage() && ec2IsHttp) return "gateway";
+  return "ec2"; // local dev (http://localhost) can still use EC2
+}
 
 export default function StudioPage() {
   const router = useRouter();
@@ -21,7 +35,6 @@ export default function StudioPage() {
   const [numImages, setNumImages] = useState<string>("");
   const [contentType, setContentType] = useState<string>("");
 
-  // ✅ optional image upload
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
 
@@ -36,7 +49,6 @@ export default function StudioPage() {
   const [isError, setIsError] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
-  // queue
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
@@ -44,6 +56,8 @@ export default function StudioPage() {
   const [lastPayload, setLastPayload] = useState<any>(null);
 
   const [isMemeMode, setIsMemeMode] = useState<boolean>(false);
+
+  const QUEUE_BASE = useMemo(() => pickQueueBase(), []);
 
   useEffect(() => {
     const saved =
@@ -57,7 +71,6 @@ export default function StudioPage() {
     };
   }, []);
 
-  // cleanup preview url
   useEffect(() => {
     return () => {
       if (imagePreview) URL.revokeObjectURL(imagePreview);
@@ -100,18 +113,16 @@ export default function StudioPage() {
     return meta.error || data.error || null;
   };
 
-  // ✅ FIXED: poll uses apiFetch (same API_BASE + gateway logic) + sends token
   const pollStatus = (id: string) => {
     if (pollRef.current) clearInterval(pollRef.current);
 
     pollRef.current = setInterval(async () => {
       try {
         const token = getToken();
-
         const data = await apiFetch(`/queue/status/${id}`, {
           method: "GET",
           token,
-          base: "ec2",
+          base: QUEUE_BASE, // ✅ gateway on https deploy
         });
 
         setJobStatus(data?.status);
@@ -143,7 +154,6 @@ export default function StudioPage() {
     }, 2000);
   };
 
-  // ✅ image picker
   const handleImagePick = (file?: File) => {
     if (!file) return;
 
@@ -173,35 +183,29 @@ export default function StudioPage() {
     const token = getToken();
     if (!token) throw new Error("Missing token. Please login again.");
 
-    // ✅ If image is attached -> multipart/form-data
+    // ✅ multipart (optional image)
     if (imageFile) {
       const fd = new FormData();
-
       Object.entries(payload).forEach(([k, v]) => {
         fd.append(k, typeof v === "object" ? JSON.stringify(v) : String(v));
       });
-
       fd.append("image", imageFile);
 
-      const data = await apiUpload("/queue/enqueue", {
+      return await apiUpload("/queue/enqueue", {
         method: "POST",
         formData: fd,
         token,
-        base: "ec2",
+        base: QUEUE_BASE, // ✅ gateway on https deploy
       });
-
-      return data;
     }
 
     // ✅ JSON
-    const data = await apiFetch("/queue/enqueue", {
+    return await apiFetch("/queue/enqueue", {
       method: "POST",
       body: payload,
       token,
-      base: "ec2",
+      base: QUEUE_BASE, // ✅ gateway on https deploy
     });
-
-    return data;
   };
 
   const handleSubmit = async (e?: React.FormEvent, isRetry = false) => {
@@ -259,7 +263,6 @@ export default function StudioPage() {
     } catch (err: any) {
       const msg = err?.message || "Failed to enqueue job. Please try again.";
 
-      // ✅ If token issue, kick back to login
       const lower = String(msg).toLowerCase();
       if (
         lower.includes("unauthorized") ||
@@ -328,8 +331,15 @@ export default function StudioPage() {
                 Generate content + visuals, queue jobs, and auto-post to
                 platforms.
               </p>
+
               <p className="mt-2 text-xs text-muted-foreground">
-                Backend: {API_BASE}
+                Gateway: {GATEWAY_BASE}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                EC2: {EC2_BASE}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Queue requests using: <b>{QUEUE_BASE}</b>
               </p>
             </div>
 
@@ -346,7 +356,6 @@ export default function StudioPage() {
           </div>
 
           <div className="mt-10 grid grid-cols-1 gap-8 md:grid-cols-2 md:items-start">
-            {/* Left help card */}
             <div className="rounded-3xl border border-border bg-card p-8 shadow-sm">
               <p className="text-sm font-medium">How it works</p>
               <ul className="mt-4 space-y-3 text-sm text-muted-foreground">
@@ -382,7 +391,6 @@ export default function StudioPage() {
               </div>
             </div>
 
-            {/* Right form */}
             <form
               onSubmit={handleSubmit}
               className="rounded-3xl border border-border bg-card p-8 shadow-sm"
@@ -643,7 +651,6 @@ export default function StudioPage() {
             </form>
           </div>
 
-          {/* Results */}
           {result?.image_urls?.length > 0 && (
             <div className="mt-10 rounded-3xl border border-border bg-card p-8 shadow-sm">
               <h3 className="text-lg font-semibold">Generated Images</h3>
