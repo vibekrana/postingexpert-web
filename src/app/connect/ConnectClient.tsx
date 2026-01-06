@@ -1,15 +1,22 @@
+// src/app/connect/ConnectClient.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import LinkedInConnectClient from "./linkedin/LinkedInConnectClient";
+import { apiFetch } from "@/lib/api";
+import { getToken, clearAuth } from "@/lib/auth";
 
 type SocialDetail = Record<string, any> | null;
 
-type SocialStatusResponse = {
-  instagram?: { connected?: boolean; detail?: SocialDetail };
-  linkedin?: { connected?: boolean; detail?: SocialDetail };
-  facebook?: { connected?: boolean; detail?: SocialDetail };
+type SocialStatus = {
+  instagram: boolean;
+  linkedin: boolean;
+  facebook: boolean;
+  instagram_detail?: SocialDetail;
+  linkedin_detail?: SocialDetail;
+  facebook_detail?: SocialDetail;
+  [k: string]: any;
 };
 
 type ProfileLite = {
@@ -21,20 +28,11 @@ type ProfileLite = {
   scheduled_time?: string;
 };
 
-const API_BASE = (
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://13.233.45.167:5000"
-).replace(/\/$/, "");
-
-function getToken() {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem("token");
-}
-
 function getAppUser(profile?: ProfileLite | null) {
   return (
     profile?.username ||
-    localStorage.getItem("username") ||
-    localStorage.getItem("registeredUserId") ||
+    (typeof window !== "undefined" ? localStorage.getItem("username") : "") ||
+    (typeof window !== "undefined" ? localStorage.getItem("registeredUserId") : "") ||
     ""
   );
 }
@@ -43,7 +41,6 @@ function getAppUser(profile?: ProfileLite | null) {
 function buildInstagramAuthUrl(appUser: string) {
   const clientId = process.env.NEXT_PUBLIC_INSTAGRAM_CLIENT_ID || "";
   const redirectUri = process.env.NEXT_PUBLIC_INSTAGRAM_REDIRECT_URI || "";
-
   if (!clientId || !redirectUri) return null;
 
   const scopes = [
@@ -78,102 +75,116 @@ function openCenteredPopup(url: string, title: string) {
   );
 }
 
-export default function ConnectClient({ profile }: { profile: ProfileLite | null }) {
+function isAuthErrorMessage(msg: string) {
+  const m = (msg || "").toLowerCase();
+  return (
+    m.includes("401") ||
+    m.includes("403") ||
+    m.includes("unauthorized") ||
+    m.includes("forbidden") ||
+    m.includes("token") ||
+    m.includes("authorization")
+  );
+}
+
+export default function ConnectClient({
+  profile,
+  social,
+}: {
+  profile: ProfileLite | null;
+  social: SocialStatus; // ✅ receives normalized social status from page.tsx
+}) {
   const router = useRouter();
 
-  const [social, setSocial] = useState({
-    instagram: { connected: false, detail: null as SocialDetail },
-    linkedin: { connected: false, detail: null as SocialDetail },
-    facebook: { connected: false, detail: null as SocialDetail },
-  });
-
+  // ✅ local copy so UI updates instantly
+  const [localSocial, setLocalSocial] = useState<SocialStatus>(social);
   const [toast, setToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLocalSocial(social);
+  }, [social]);
 
   const appUser = useMemo(() => getAppUser(profile), [profile?.username]);
 
-  const connectedCount = useMemo(
-    () => Object.values(social).filter((x) => x.connected).length,
-    [social]
-  );
+  const connectedCount = useMemo(() => {
+    return [localSocial.instagram, localSocial.linkedin, localSocial.facebook].filter(Boolean)
+      .length;
+  }, [localSocial]);
 
-  const fetchSocialStatus = async () => {
+  // ✅ re-fetch status using apiFetch (same gateway logic + no CORS mess)
+  const refreshSocial = async () => {
     const token = getToken();
     if (!token) {
       setToast("❌ Missing token. Please login again.");
-      return;
-    }
-    if (!appUser) {
-      setToast("❌ Missing appUser (username).");
+      clearAuth();
+      router.replace("/login");
       return;
     }
 
     try {
-      const res = await fetch(
-        `${API_BASE}/social/status?app_user=${encodeURIComponent(appUser)}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          cache: "no-store",
-        }
-      );
+      const res = await apiFetch("/social/status", {
+        method: "GET",
+        token,
+      });
 
-      if (!res.ok) {
-        const t = await res.text();
-        setToast(`❌ Status failed: ${res.status} ${t?.slice(0, 120)}`);
+      // allow boolean shape or {status:{}} shape or {linkedin:{connected:true}}
+      const s = res?.status || res?.connected || res || {};
+      const pickBool = (v: any) => {
+        if (typeof v === "boolean") return v;
+        if (v && typeof v === "object") {
+          if (typeof v.connected === "boolean") return v.connected;
+          if (typeof v.is_connected === "boolean") return v.is_connected;
+          if (typeof v.ok === "boolean") return v.ok;
+        }
+        return false;
+      };
+
+      const next: SocialStatus = {
+        instagram: pickBool(s.instagram),
+        linkedin: pickBool(s.linkedin),
+        facebook: pickBool(s.facebook),
+
+        // optional detail shapes if backend provides
+        instagram_detail: s.instagram?.detail || s.instagram_detail || null,
+        linkedin_detail: s.linkedin?.detail || s.linkedin_detail || null,
+        facebook_detail: s.facebook?.detail || s.facebook_detail || null,
+      };
+
+      setLocalSocial(next);
+    } catch (e: any) {
+      const msg = e?.message || "Failed to refresh social status.";
+      if (isAuthErrorMessage(msg)) {
+        clearAuth();
+        router.replace("/login");
         return;
       }
-
-      const data = (await res.json()) as SocialStatusResponse;
-
-      setSocial({
-        instagram: {
-          connected: Boolean(data.instagram?.connected),
-          detail: data.instagram?.detail || null,
-        },
-        linkedin: {
-          connected: Boolean(data.linkedin?.connected),
-          detail: data.linkedin?.detail || null,
-        },
-        facebook: {
-          connected: Boolean(data.facebook?.connected),
-          detail: data.facebook?.detail || null,
-        },
-      });
-    } catch (e: any) {
-      // This is your "Failed to fetch" issue (CORS / wrong URL / network)
-      setToast(`❌ Failed to fetch: ${e?.message || "Network/CORS error"}`);
+      setToast(`❌ ${msg}`);
     }
   };
 
-  useEffect(() => {
-    fetchSocialStatus();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appUser]);
-
-  // Listen for popup callback messages (Instagram page.tsx already postMessage)
+  // Listen for popup callback messages (if your callback page posts message)
   useEffect(() => {
     const handler = (event: MessageEvent) => {
       const msg = event.data;
       if (!msg || typeof msg !== "object" || !msg.type) return;
 
       if (msg.type === "instagram_callback") {
-        if (msg.success) {
-          setToast("✅ Instagram connected!");
-        } else {
-          setToast(`❌ Instagram: ${msg.error || "Connection failed"}`);
-        }
-        fetchSocialStatus();
+        if (msg.success) setToast("✅ Instagram connected!");
+        else setToast(`❌ Instagram: ${msg.error || "Connection failed"}`);
+        refreshSocial();
+      }
+
+      if (msg.type === "linkedin_callback") {
+        if (msg.success) setToast("✅ LinkedIn connected!");
+        else setToast(`❌ LinkedIn: ${msg.error || "Connection failed"}`);
+        refreshSocial();
       }
     };
 
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appUser]);
-
-  const instagramConnected = social.instagram.connected;
+  }, []);
 
   const onInstagramConnect = () => {
     if (!appUser) {
@@ -236,12 +247,19 @@ export default function ConnectClient({ profile }: { profile: ProfileLite | null
           >
             Go to Dashboard
           </button>
+
+          <button
+            onClick={refreshSocial}
+            className="rounded-full border border-border bg-card px-6 py-3 text-sm font-medium transition hover:bg-muted"
+          >
+            Refresh status
+          </button>
         </div>
       </div>
 
       {/* Platforms */}
       <div className="mt-10 grid grid-cols-1 gap-4 md:grid-cols-3">
-        {/* ✅ LinkedIn unchanged */}
+        {/* ✅ LinkedIn */}
         <div className="rounded-3xl border border-border bg-background p-6">
           <p className="text-lg font-semibold">LinkedIn</p>
           <p className="mt-2 text-sm text-muted-foreground">
@@ -250,35 +268,37 @@ export default function ConnectClient({ profile }: { profile: ProfileLite | null
 
           <LinkedInConnectClient
             appUser={appUser}
-            connected={social.linkedin.connected}
-            connectionDetails={{ detail: social.linkedin.detail }}
-            onConnected={() => fetchSocialStatus()}
+            connected={!!localSocial.linkedin}
+            connectionDetails={{ detail: localSocial.linkedin_detail || null }}
+            onConnected={() => refreshSocial()}
             fullWidth
             connectLabel="Connect"
             disconnectLabel="Disconnect"
           />
         </div>
 
-        {/* ✅ Instagram fixed: open OAuth popup (NOT router push) */}
+        {/* ✅ Instagram */}
         <div className="rounded-3xl border border-border bg-background p-6">
           <p className="text-lg font-semibold">Instagram</p>
-          <p className="mt-2 text-sm text-muted-foreground">Auto post images + captions</p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Auto post images + captions
+          </p>
 
           <button
             onClick={onInstagramConnect}
             className="mt-5 w-full rounded-full bg-primary px-5 py-3 text-sm font-medium text-primary-foreground shadow-sm transition hover:opacity-90"
           >
-            {instagramConnected ? "Connected" : "Connect"}
+            {localSocial.instagram ? "Connected" : "Connect"}
           </button>
 
-          {!!social.instagram.detail?.username && (
+          {!!localSocial.instagram_detail?.username && (
             <div className="mt-2 text-xs text-muted-foreground">
-              @{social.instagram.detail.username}
+              @{localSocial.instagram_detail.username}
             </div>
           )}
         </div>
 
-        {/* Facebook (keep as your route for now) */}
+        {/* Facebook */}
         <PlatformCard
           title="Facebook"
           desc="Pages + scheduled posting"

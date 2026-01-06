@@ -23,6 +23,13 @@ type Profile = {
   [k: string]: any;
 };
 
+type SocialStatus = {
+  instagram: boolean;
+  linkedin: boolean;
+  facebook: boolean;
+  [k: string]: any;
+};
+
 function safeJsonParse(s: string) {
   try {
     return JSON.parse(s);
@@ -31,15 +38,17 @@ function safeJsonParse(s: string) {
   }
 }
 
-function normalizeProfile(raw: any): Profile {
-  let data: any = raw;
-
+function normalizeLambdaWrapped(raw: any) {
   // backend may wrap response like: { body: "..." }
-  if (data?.body && typeof data.body === "string") {
-    const parsed = safeJsonParse(data.body);
-    if (parsed) data = parsed;
+  if (raw?.body && typeof raw.body === "string") {
+    const parsed = safeJsonParse(raw.body);
+    if (parsed) return parsed;
   }
+  return raw;
+}
 
+function normalizeProfile(raw: any): Profile {
+  const data = normalizeLambdaWrapped(raw);
   const p = data?.user || data?.profile || data || {};
 
   return {
@@ -54,6 +63,32 @@ function normalizeProfile(raw: any): Profile {
   };
 }
 
+function normalizeSocialStatus(raw: any): SocialStatus {
+  const data = normalizeLambdaWrapped(raw);
+
+  // Possible shapes:
+  // 1) { instagram: true, linkedin: true, facebook: false }
+  // 2) { status: { instagram: true, linkedin: true, facebook: false } }
+  // 3) { connected: { ... } }
+  const s = data?.status || data?.connected || data || {};
+
+  const pickBool = (v: any) => {
+    if (typeof v === "boolean") return v;
+    if (v && typeof v === "object") {
+      if (typeof v.connected === "boolean") return v.connected;
+      if (typeof v.is_connected === "boolean") return v.is_connected;
+      if (typeof v.ok === "boolean") return v.ok;
+    }
+    return false;
+  };
+
+  return {
+    instagram: pickBool(s.instagram),
+    linkedin: pickBool(s.linkedin),
+    facebook: pickBool(s.facebook),
+  };
+}
+
 function isAuthErrorMessage(msg: string) {
   const m = (msg || "").toLowerCase();
   return (
@@ -61,7 +96,8 @@ function isAuthErrorMessage(msg: string) {
     m.includes("403") ||
     m.includes("unauthorized") ||
     m.includes("forbidden") ||
-    m.includes("token")
+    m.includes("token") ||
+    m.includes("authorization")
   );
 }
 
@@ -70,11 +106,14 @@ export default function ConnectPage() {
   const { ready } = useRequireAuth("/login");
 
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [social, setSocial] = useState<SocialStatus>({
+    instagram: false,
+    linkedin: false,
+    facebook: false,
+  });
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (!ready) return;
-
+  const reloadAll = async () => {
     const token = getToken();
     if (!token) {
       clearAuth();
@@ -82,48 +121,73 @@ export default function ConnectPage() {
       return;
     }
 
-    const load = async () => {
-      setLoading(true);
+    setLoading(true);
+    try {
+      const [profileRaw, socialRaw] = await Promise.all([
+        apiFetch("/user/profile", { method: "GET", token }),
+        apiFetch("/social/status", { method: "GET", token }),
+      ]);
 
-        try {
-        const data = await apiFetch("/user/profile", {
-          method: "GET",
-          token,
-          });
+      setProfile(normalizeProfile(profileRaw));
+      setSocial(normalizeSocialStatus(socialRaw));
+    } catch (e: any) {
+      const msg = e?.message || "";
 
-          setProfile(normalizeProfile(data));
-        }  catch (e: any) {
-        const msg = e?.message || "";
-
-        if (isAuthErrorMessage(msg)) {
-          clearAuth();
-          router.replace("/login");
-          return;
-        }
-
-        // fallback (still let user see connect page)
-        setProfile({
-          username: localStorage.getItem("username") || "User",
-          email: "",
-          business_type: "Not specified",
-          scheduled_time: "Not set",
-          posts_created: 0,
-          connected_accounts: 0,
-        });
-      } finally {
-        setLoading(false);
+      if (isAuthErrorMessage(msg)) {
+        clearAuth();
+        router.replace("/login");
+        return;
       }
-    };
 
-    load();
-  }, [ready, router]);
+      // fallback (still let user see connect page)
+      setProfile({
+        username: localStorage.getItem("username") || "User",
+        email: "",
+        business_type: "Not specified",
+        scheduled_time: "Not set",
+        posts_created: 0,
+        connected_accounts: 0,
+      });
+
+      setSocial({ instagram: false, linkedin: false, facebook: false });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!ready) return;
+    reloadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready]);
+
+  // ✅ After OAuth callback redirect, status can update slightly later
+  // This makes UI show connected without user refreshing.
+  useEffect(() => {
+    if (!ready) return;
+
+    const hasOAuthParams =
+      typeof window !== "undefined" &&
+      (window.location.search.includes("code=") ||
+        window.location.search.includes("state="));
+
+    if (!hasOAuthParams) return;
+
+    const t = setTimeout(() => reloadAll(), 1200);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready]);
 
   const displayName = useMemo(() => {
     if (!profile) return "User";
     return profile.name || profile.username || "User";
   }, [profile]);
 
-  const connectedCount = profile?.connected_accounts ?? 0;
+  // ✅ Real connected count from /social/status
+  const connectedCount = useMemo(() => {
+    return [social.instagram, social.linkedin, social.facebook].filter(Boolean)
+      .length;
+  }, [social]);
 
   if (!ready) return null;
 
@@ -140,7 +204,8 @@ export default function ConnectPage() {
               Your workspace is ready.
             </h1>
             <p className="max-w-2xl text-muted-foreground">
-              One-time setup. After this, PostingExpert runs quietly in the background.
+              One-time setup. After this, PostingExpert runs quietly in the
+              background.
             </p>
           </div>
 
@@ -177,7 +242,7 @@ export default function ConnectPage() {
               <div className="mt-3 rounded-2xl border border-border bg-background p-4">
                 <p className="text-xs text-muted-foreground">Connected accounts</p>
                 <p className="mt-1 text-2xl font-semibold">
-                  {loading ? "—" : connectedCount}
+                  {loading ? "—" : `${connectedCount}/3`}
                 </p>
               </div>
 
@@ -199,11 +264,19 @@ export default function ConnectPage() {
                   Upload later (we’ll guide you).
                 </p>
               </div>
+
+              <button
+                type="button"
+                onClick={reloadAll}
+                className="mt-4 w-full rounded-2xl border border-border bg-card px-4 py-3 text-sm font-medium hover:bg-muted"
+              >
+                Refresh status
+              </button>
             </div>
           </div>
 
           {/* Connect buttons */}
-          <ConnectClient profile={profile} />
+          <ConnectClient profile={profile} social={social} />
         </div>
 
         <SiteFooter />

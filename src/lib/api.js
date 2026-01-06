@@ -1,23 +1,40 @@
 // src/lib/api.js
 
-// ✅ Use API Gateway (Lambda) as the default base so it can start EC2 when stopped
-const API_BASE =
-  (process.env.NEXT_PUBLIC_GATEWAY_BASE_URL ||
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    process.env.NEXT_PUBLIC_LAMBDA_URL ||
-    "https://4fqbpp1yya.execute-api.ap-south-1.amazonaws.com/prod"
-  ).replace(/\/$/, "");
+// ✅ API Gateway / Lambda (Auth etc.)
+export const GATEWAY_BASE = (
+  process.env.NEXT_PUBLIC_GATEWAY_BASE_URL ||
+  process.env.NEXT_PUBLIC_LAMBDA_URL ||
+  "https://4fqbpp1yya.execute-api.ap-south-1.amazonaws.com/prod"
+).replace(/\/$/, "");
+
+// ✅ EC2 Flask (Studio / Queue)
+export const EC2_BASE = (
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  "http://13.233.45.167:5000"
+).replace(/\/$/, "");
+
+// Keep old export name for UI display if you want
+export const API_BASE = GATEWAY_BASE;
 
 /**
  * ✅ DEFAULT JSON API
+ * options.base: "gateway" | "ec2"
  */
-export async function apiFetch(path, options = {}) { 
-  const { method = "GET", body, token } = options;
-  
-  const headers = { "Content-Type": "application/json" };
+export async function apiFetch(path, options = {}) {
+  const {
+    method = "GET",
+    body,
+    token,
+    headers: extraHeaders = {},
+    base = "gateway",
+  } = options;
+
+  const BASE = base === "ec2" ? EC2_BASE : GATEWAY_BASE;
+
+  const headers = { "Content-Type": "application/json", ...extraHeaders };
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const url = `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
+  const url = `${BASE}${path.startsWith("/") ? path : `/${path}`}`;
   console.log(`🔵 API Request: ${method} ${url}`);
 
   const res = await fetch(url, {
@@ -48,20 +65,23 @@ export async function apiFetch(path, options = {}) {
 
 /**
  * ✅ MULTIPART API
+ * options.base: "gateway" | "ec2"
  */
 export async function apiUpload(path, options = {}) {
-  const { method = "POST", formData, token } = options;
+  const { method = "POST", formData, token, base = "gateway" } = options;
+
+  const BASE = base === "ec2" ? EC2_BASE : GATEWAY_BASE;
 
   const headers = {};
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const url = `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
+  const url = `${BASE}${path.startsWith("/") ? path : `/${path}`}`;
   console.log(`🔵 Upload Request: ${method} ${url}`);
 
   const res = await fetch(url, {
     method,
-    headers, // browser sets boundary
-    body: formData,
+    headers,
+    body: formData, // browser sets boundary
     cache: "no-store",
   });
 
@@ -83,5 +103,3 @@ export async function apiUpload(path, options = {}) {
   console.log(`✅ Upload Success: ${res.status}`);
   return data;
 }
-
-export { API_BASE };

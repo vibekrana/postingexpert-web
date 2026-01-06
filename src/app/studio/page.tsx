@@ -1,17 +1,28 @@
-//src/app/studio/page.tsx
+// src/app/studio/page.tsx
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SiteNavbar } from "@/components/site-navbar";
 import { SiteFooter } from "@/components/site-footer";
 
-// ✅ use aliases (avoid src/...) + add apiUpload
 import { apiFetch, apiUpload, API_BASE } from "@/lib/api";
 import { getToken, clearAuth } from "@/lib/auth";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 
 type Platforms = { instagram: boolean; linkedin: boolean; facebook: boolean };
+
+function isAuthErrorMessage(msg: string) {
+  const m = (msg || "").toLowerCase();
+  return (
+    m.includes("401") ||
+    m.includes("403") ||
+    m.includes("unauthorized") ||
+    m.includes("forbidden") ||
+    m.includes("token") ||
+    m.includes("authorization")
+  );
+}
 
 export default function StudioPage() {
   const router = useRouter();
@@ -21,7 +32,6 @@ export default function StudioPage() {
   const [numImages, setNumImages] = useState<string>("");
   const [contentType, setContentType] = useState<string>("");
 
-  // ✅ NEW: optional image upload
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
 
@@ -45,15 +55,15 @@ export default function StudioPage() {
 
   const [isMemeMode, setIsMemeMode] = useState<boolean>(false);
 
+  // ---- poll controls (NEW)
+  const pollCountRef = useRef<number>(0);
+  const MAX_POLLS = 180; // 180 * 2s = 6 minutes
+
   useEffect(() => {
     const saved =
-      typeof window !== "undefined"
-        ? localStorage.getItem("meme_mode")
-        : null;
-
+      typeof window !== "undefined" ? localStorage.getItem("meme_mode") : null;
     if (saved === "true") setIsMemeMode(true);
   }, []);
-
 
   useEffect(() => {
     return () => {
@@ -61,7 +71,6 @@ export default function StudioPage() {
     };
   }, []);
 
-  // cleanup preview url
   useEffect(() => {
     return () => {
       if (imagePreview) URL.revokeObjectURL(imagePreview);
@@ -104,45 +113,96 @@ export default function StudioPage() {
     return meta.error || data.error || null;
   };
 
-  const pollStatus = (id: string) => {
+  const stopPolling = () => {
     if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = null;
+  };
+
+  // ✅ FIXED pollStatus
+  const pollStatus = (id: string) => {
+    stopPolling();
+    pollCountRef.current = 0;
 
     pollRef.current = setInterval(async () => {
+      pollCountRef.current += 1;
+
+      // ✅ timeout protection (NEW)
+      if (pollCountRef.current > MAX_POLLS) {
+        setIsLoading(false);
+        setIsError(true);
+        setResponseMessage(
+          "Polling timed out. Job is taking too long (or backend stopped). Please retry."
+        );
+        setJobStatus("failed"); // ✅ IMPORTANT: reset UI state
+        stopPolling();
+        return;
+      }
+
       try {
-        // NOTE: status endpoint doesn't require token in your old code.
-        const res = await fetch(`${API_BASE}/queue/status/${id}`);
-        const data = await res.json();
+        const token = getToken();
+        if (!token) {
+          clearAuth();
+          router.replace("/login");
+          return;
+        }
 
-        setJobStatus(data.status);
+        const data = await apiFetch(`/queue/status/${id}`, {
+          method: "GET",
+          token,
+        });
 
-        if (data.status === "completed") {
-          const r = extractResultFromStatus(data);
+        // some backends return { body: "json string" }
+        let normalized = data;
+        if (data?.body && typeof data.body === "string") {
+          try {
+            normalized = JSON.parse(data.body);
+          } catch {}
+        }
+
+        const st = normalized?.status ?? data?.status;
+        setJobStatus(st || null);
+
+        if (st === "completed") {
+          const r = extractResultFromStatus(normalized || data);
           setResult(r);
           setResponseMessage("🎉 Content generated successfully!");
           setIsError(false);
           setIsLoading(false);
-          clearInterval(pollRef.current);
-          pollRef.current = null;
-        } else if (data.status === "failed") {
+          stopPolling();
+          return;
+        }
+
+        if (st === "failed") {
           const errText =
-            extractErrorFromStatus(data) || "Job failed. Please try again.";
+            extractErrorFromStatus(normalized || data) ||
+            "Job failed. Please try again.";
           setIsLoading(false);
           setIsError(true);
           setResponseMessage(errText);
-          clearInterval(pollRef.current);
-          pollRef.current = null;
+          stopPolling();
+          return;
         }
-      } catch (err) {
+      } catch (err: any) {
+        const msg = err?.message || "Failed to fetch job status.";
+
+        // ✅ if auth error during poll -> logout (NEW)
+        if (isAuthErrorMessage(msg)) {
+          clearAuth();
+          router.replace("/login");
+          return;
+        }
+
+        // ✅ THIS IS THE MAIN FIX:
+        // reset jobStatus so UI does NOT stay in "Processing..."
         setIsLoading(false);
         setIsError(true);
-        setResponseMessage("Failed to fetch job status.");
-        clearInterval(pollRef.current);
-        pollRef.current = null;
+        setResponseMessage(msg);
+        setJobStatus("failed"); // ✅ IMPORTANT
+        stopPolling();
       }
     }, 2000);
   };
 
-  // ✅ NEW: image picker
   const handleImagePick = (file?: File) => {
     if (!file) return;
 
@@ -172,36 +232,25 @@ export default function StudioPage() {
     const token = getToken();
     if (!token) throw new Error("Missing token. Please login again.");
 
-    // ✅ If image is attached -> multipart/form-data
     if (imageFile) {
       const fd = new FormData();
-
-      // Append payload fields (objects as JSON strings)
       Object.entries(payload).forEach(([k, v]) => {
         fd.append(k, typeof v === "object" ? JSON.stringify(v) : String(v));
       });
-
-      // Append the file
       fd.append("image", imageFile);
 
-      // ✅ Same endpoint; backend must accept multipart for image
-      const data = await apiUpload("/queue/enqueue", {
+      return await apiUpload("/queue/enqueue", {
         method: "POST",
         formData: fd,
         token,
       });
-
-      return data;
     }
 
-    // ✅ Original JSON behavior (no image)
-    const data = await apiFetch("/queue/enqueue", {
+    return await apiFetch("/queue/enqueue", {
       method: "POST",
       body: payload,
       token,
     });
-
-    return data;
   };
 
   const handleSubmit = async (e?: React.FormEvent, isRetry = false) => {
@@ -210,7 +259,6 @@ export default function StudioPage() {
 
     const userId =
       localStorage.getItem("username") || localStorage.getItem("user_id") || "";
-
     const username = localStorage.getItem("username") || userId || "";
 
     if (!userId || !username) {
@@ -241,7 +289,6 @@ export default function StudioPage() {
           },
           meme: isMemeMode,
           meme_mode: isMemeMode,
-          // ✅ optional hint for backend (if you want)
           has_image: !!imageFile,
         };
 
@@ -249,24 +296,28 @@ export default function StudioPage() {
 
     try {
       const out = await enqueue(payload);
-      const id = out.job_id || out.id || out.jobId;
+      const id = out?.job_id || out?.id || out?.jobId;
       if (!id) throw new Error("Queue response missing job_id");
 
       setJobId(id);
       setJobStatus("queued");
       setResponseMessage("✅ Request queued successfully! Processing started…");
+      setIsError(false);
 
       pollStatus(id);
     } catch (err: any) {
       const msg = err?.message || "Failed to enqueue job. Please try again.";
-      if (msg.toLowerCase().includes("authorization")) {
+
+      if (isAuthErrorMessage(msg)) {
         clearAuth();
         router.replace("/login");
         return;
       }
+
       setIsLoading(false);
       setIsError(true);
       setResponseMessage(msg);
+      setJobStatus("failed"); // ✅ keeps UI consistent
     }
   };
 
@@ -283,10 +334,9 @@ export default function StudioPage() {
     setJobStatus(null);
     setJobId(null);
 
-    // ✅ reset image
     removeImage();
-
-    if (pollRef.current) clearInterval(pollRef.current);
+    stopPolling();
+    setIsLoading(false);
   };
 
   const statusLabel = useMemo(() => {
@@ -300,7 +350,6 @@ export default function StudioPage() {
   const isBusy =
     isLoading || jobStatus === "queued" || jobStatus === "in_progress";
 
-  // auth gate
   if (!ready) return null;
 
   return (
@@ -315,8 +364,7 @@ export default function StudioPage() {
                 AI Content Studio
               </h1>
               <p className="mt-4 text-muted-foreground">
-                Generate content + visuals, queue jobs, and auto-post to
-                platforms.
+                Generate content + visuals, queue jobs, and auto-post to platforms.
               </p>
               <p className="mt-2 text-xs text-muted-foreground">
                 Backend: {API_BASE}
@@ -336,7 +384,6 @@ export default function StudioPage() {
           </div>
 
           <div className="mt-10 grid grid-cols-1 gap-8 md:grid-cols-2 md:items-start">
-            {/* Left help card */}
             <div className="rounded-3xl border border-border bg-card p-8 shadow-sm">
               <p className="text-sm font-medium">How it works</p>
               <ul className="mt-4 space-y-3 text-sm text-muted-foreground">
@@ -372,7 +419,6 @@ export default function StudioPage() {
               </div>
             </div>
 
-            {/* Right form */}
             <form
               onSubmit={handleSubmit}
               className="rounded-3xl border border-border bg-card p-8 shadow-sm"
@@ -388,7 +434,6 @@ export default function StudioPage() {
                     Marketing Theme
                   </label>
 
-                  {/* ✅ NEW: plus icon + prompt input (same look as your UI) */}
                   <div className="mt-2 flex items-end gap-3">
                     <label
                       className={[
@@ -416,39 +461,6 @@ export default function StudioPage() {
                       disabled={isBusy}
                     />
                   </div>
-
-                  {/* ✅ NEW: optional image preview */}
-                  {imagePreview && (
-                    <div className="mt-3 flex items-center justify-between gap-4 rounded-2xl border border-border bg-background p-4">
-                      <div className="flex items-center gap-4">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={imagePreview}
-                          alt="Attached"
-                          className="h-12 w-12 rounded-xl border border-border object-cover bg-card"
-                        />
-                        <div>
-                          <p className="text-sm font-medium">
-                            {imageFile?.name || "Attached image"}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {imageFile
-                              ? `${(imageFile.size / 1024).toFixed(1)} KB`
-                              : ""}
-                          </p>
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={removeImage}
-                        disabled={isBusy}
-                        className="rounded-full border border-border bg-card px-3 py-2 text-sm hover:bg-muted disabled:opacity-60"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  )}
 
                   {errors.prompt && (
                     <p className="mt-2 text-xs text-red-500">{errors.prompt}</p>
@@ -625,17 +637,12 @@ export default function StudioPage() {
                       <span className="text-muted-foreground">Status</span>
                       <span className="font-medium">{statusLabel}</span>
                     </div>
-                    <p className="mt-3 text-xs text-muted-foreground">
-                      Tip: You’ll also receive updates via email (as per backend
-                      flow).
-                    </p>
                   </div>
                 )}
               </div>
             </form>
           </div>
 
-          {/* Results */}
           {result?.image_urls?.length > 0 && (
             <div className="mt-10 rounded-3xl border border-border bg-card p-8 shadow-sm">
               <h3 className="text-lg font-semibold">Generated Images</h3>

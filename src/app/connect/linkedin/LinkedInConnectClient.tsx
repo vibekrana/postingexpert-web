@@ -1,3 +1,4 @@
+//src/app/connect/linkedin/LinkedInConnectClient.tsx
 "use client";
 
 import React, { useEffect, useState } from "react";
