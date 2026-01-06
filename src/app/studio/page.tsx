@@ -1,7 +1,7 @@
-//src/app/studio/page.tsx
+// src/app/studio/page.tsx
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SiteNavbar } from "@/components/site-navbar";
 import { SiteFooter } from "@/components/site-footer";
@@ -11,6 +11,21 @@ import { getToken, clearAuth } from "@/lib/auth";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 
 type Platforms = { instagram: boolean; linkedin: boolean; facebook: boolean };
+
+function isHttpsPage() {
+  if (typeof window === "undefined") return false;
+  return window.location.protocol === "https:";
+}
+
+/**
+ * ✅ FIX:
+ * - In production (HTTPS), ALWAYS use same-origin proxy to avoid CORS issues.
+ * - In local dev (HTTP), you can use EC2 if needed.
+ */
+function pickQueueBase(): "proxy" | "gateway" | "ec2" {
+  if (isHttpsPage()) return "proxy";
+  return "ec2";
+}
 
 export default function StudioPage() {
   const router = useRouter();
@@ -41,6 +56,8 @@ export default function StudioPage() {
   const [lastPayload, setLastPayload] = useState<any>(null);
 
   const [isMemeMode, setIsMemeMode] = useState<boolean>(false);
+
+  const QUEUE_BASE = useMemo(() => pickQueueBase(), []);
 
   useEffect(() => {
     const saved =
@@ -105,6 +122,7 @@ export default function StudioPage() {
         const data = await apiFetch(`/queue/status/${id}`, {
           method: "GET",
           token,
+          base: QUEUE_BASE, // ✅ proxy on HTTPS deploy
         });
 
         setJobStatus(data?.status);
@@ -165,8 +183,7 @@ export default function StudioPage() {
     const token = getToken();
     if (!token) throw new Error("Missing token. Please login again.");
 
-    console.log("🔵 Enqueueing job with payload:", payload);
-
+    // ✅ multipart (optional image)
     if (imageFile) {
       const fd = new FormData();
       Object.entries(payload).forEach(([k, v]) => {
@@ -178,13 +195,16 @@ export default function StudioPage() {
         method: "POST",
         formData: fd,
         token,
+        base: QUEUE_BASE, // ✅ proxy on HTTPS deploy
       });
     }
 
+    // ✅ JSON
     return await apiFetch("/queue/enqueue", {
       method: "POST",
       body: payload,
       token,
+      base: QUEUE_BASE, // ✅ proxy on HTTPS deploy
     });
   };
 
@@ -260,8 +280,6 @@ export default function StudioPage() {
       setIsLoading(false);
       setIsError(true);
       setResponseMessage(msg);
-
-      console.error("❌ Submit error:", err);
     }
   };
 
@@ -285,13 +303,13 @@ export default function StudioPage() {
     setIsLoading(false);
   };
 
-  const statusLabel = (() => {
+  const statusLabel = useMemo(() => {
     if (jobStatus === "in_progress") return "Processing…";
     if (jobStatus === "queued") return "Queued…";
     if (jobStatus === "completed") return "Completed";
     if (jobStatus === "failed") return "Failed";
     return jobStatus || "—";
-  })();
+  }, [jobStatus]);
 
   const isBusy =
     isLoading || jobStatus === "queued" || jobStatus === "in_progress";
@@ -321,7 +339,7 @@ export default function StudioPage() {
                 EC2: {EC2_BASE}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Queue: <b>Auto (Proxy on HTTPS, EC2 on HTTP)</b>
+                Queue requests using: <b>{QUEUE_BASE}</b>
               </p>
             </div>
 
@@ -617,41 +635,16 @@ export default function StudioPage() {
                   <div className="mt-4 rounded-2xl border border-border bg-background p-4 text-sm">
                     <div className="flex items-center justify-between">
                       <span className="text-muted-foreground">Job ID</span>
-                      <span className="font-mono font-medium text-xs">
-                        {jobId || "-"}
-                      </span>
+                      <span className="font-medium">{jobId || "-"}</span>
                     </div>
                     <div className="mt-2 flex items-center justify-between">
                       <span className="text-muted-foreground">Status</span>
-                      <span
-                        className={[
-                          "font-medium",
-                          jobStatus === "completed"
-                            ? "text-green-500"
-                            : jobStatus === "failed"
-                            ? "text-red-500"
-                            : jobStatus === "in_progress"
-                            ? "text-blue-500"
-                            : "text-yellow-500",
-                        ].join(" ")}
-                      >
-                        {statusLabel}
-                      </span>
+                      <span className="font-medium">{statusLabel}</span>
                     </div>
-
-                    {jobStatus === "queued" && (
-                      <p className="mt-3 text-xs text-muted-foreground">
-                        ⏳ Your job is in the queue. You'll receive an email when
-                        processing starts.
-                      </p>
-                    )}
-
-                    {jobStatus === "in_progress" && (
-                      <p className="mt-3 text-xs text-muted-foreground">
-                        🔄 Processing your content... This usually takes 2-5
-                        minutes.
-                      </p>
-                    )}
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      Tip: You’ll also receive updates via email (as per backend
+                      flow).
+                    </p>
                   </div>
                 )}
               </div>
@@ -679,7 +672,7 @@ export default function StudioPage() {
           {result?.pdf_url && (
             <div className="mt-6 rounded-3xl border border-border bg-card p-8 shadow-sm">
               <h3 className="text-lg font-semibold">PDF Document</h3>
-              
+              <a
                 href={result.pdf_url}
                 target="_blank"
                 rel="noreferrer"
