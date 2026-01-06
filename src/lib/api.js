@@ -16,7 +16,6 @@ export const EC2_BASE = (
 // ✅ Same-origin proxy (works in production HTTPS)
 export const PROXY_BASE = "";
 
-// Keep old export name for UI display if you want
 export const API_BASE = GATEWAY_BASE;
 
 /**
@@ -32,8 +31,19 @@ export async function apiFetch(path, options = {}) {
     base = "gateway",
   } = options;
 
+  // 🔧 Use proxy for queue endpoints when on production
+  let actualBase = base;
+  if (typeof window !== "undefined" && 
+      window.location.protocol === "https:" && 
+      path.startsWith("/queue/")) {
+    actualBase = "proxy";
+    console.log("🔄 Using Next.js proxy for queue endpoint");
+  }
+
   const BASE =
-    base === "proxy" ? PROXY_BASE : base === "ec2" ? EC2_BASE : GATEWAY_BASE;
+    actualBase === "proxy" ? PROXY_BASE : 
+    actualBase === "ec2" ? EC2_BASE : 
+    GATEWAY_BASE;
 
   const headers = { "Content-Type": "application/json", ...extraHeaders };
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -74,8 +84,19 @@ export async function apiFetch(path, options = {}) {
 export async function apiUpload(path, options = {}) {
   const { method = "POST", formData, token, base = "gateway" } = options;
 
+  // 🔧 Use proxy for queue endpoints when on production
+  let actualBase = base;
+  if (typeof window !== "undefined" && 
+      window.location.protocol === "https:" && 
+      path.startsWith("/queue/")) {
+    actualBase = "proxy";
+    console.log("🔄 Using Next.js proxy for queue upload");
+  }
+
   const BASE =
-    base === "proxy" ? PROXY_BASE : base === "ec2" ? EC2_BASE : GATEWAY_BASE;
+    actualBase === "proxy" ? PROXY_BASE : 
+    actualBase === "ec2" ? EC2_BASE : 
+    GATEWAY_BASE;
 
   const headers = {};
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -86,7 +107,7 @@ export async function apiUpload(path, options = {}) {
   const res = await fetch(url, {
     method,
     headers,
-    body: formData, // browser sets boundary
+    body: formData,
     cache: "no-store",
   });
 
