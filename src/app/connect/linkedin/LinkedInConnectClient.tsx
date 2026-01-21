@@ -38,16 +38,39 @@ type Props = {
   disconnectLabel?: string;
 };
 
+
+
+// ✅ EC2 base stays for disconnect + status (as you want)
 const API_BASE = (
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://13.233.45.167:5000"
-).replace(/\/$/, "");
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  "https://vpgqg4a4tk.execute-api.ap-south-1.amazonaws.com/prod"
+);
 
+// ✅ LinkedIn OAuth config
 const LINKEDIN_CLIENT_ID =
-  process.env.NEXT_PUBLIC_LINKEDIN_CLIENT_ID || "86geycovoa141y";
+  process.env.NEXT_PUBLIC_LINKEDIN_CLIENT_ID || "77riv9srpj3ac4";
 
+// ✅ IMPORTANT: Your Lambda REST API callback URL
 const LINKEDIN_REDIRECT_URI =
-  process.env.NEXT_PUBLIC_LINKEDIN_REDIRECT_URI ||
-  `${API_BASE}/social/linkedin/callback`;
+  "https://vpgqg4a4tk.execute-api.ap-south-1.amazonaws.com/prod/social/linkedin/callback";
+
+
+// ✅ allow only these origins to send oauth callback messages
+// Put your frontend domain here when deployed (recommended).
+const FRONTEND_ORIGIN =
+  process.env.NEXT_PUBLIC_APP_ORIGIN ||
+  (typeof window !== "undefined" ? window.location.origin : "");
+
+
+
+const ALLOWED_CALLBACK_ORIGINS = new Set<string>([
+  FRONTEND_ORIGIN, // if you ever host callback on same origin (rare)
+  // Your REST API Gateway origins (both callback gateway base and others)
+  "https://vpgqg4a4tk.execute-api.ap-south-1.amazonaws.com",
+  "https://aomkmgl9zj.execute-api.ap-south-1.amazonaws.com",
+]);
+
+
 
 export default function LinkedInConnectClient({
   appUser,
@@ -87,6 +110,15 @@ export default function LinkedInConnectClient({
     const handleMessage = (event: MessageEvent) => {
       let data: any = event.data;
 
+      // ✅ Debug (remove later)
+      console.log("[LinkedInConnectClient] message event:", {
+        origin: event.origin,
+        data,
+      });
+
+      // ✅ If you want strict origin checks, uncomment this:
+      // if (!ALLOWED_CALLBACK_ORIGINS.has(event.origin)) return;
+
       // accept stringified json also
       if (typeof data === "string") {
         try {
@@ -121,6 +153,7 @@ export default function LinkedInConnectClient({
   }, [onConnected]);
 
   const handleConnect = () => {
+    console.log("LINKEDIN_REDIRECT_URI =", LINKEDIN_REDIRECT_URI);
     if (!appUser) {
       alert("User not found. Please login again.");
       window.location.href = "/login";
@@ -134,18 +167,14 @@ export default function LinkedInConnectClient({
 
     const redirectUri = encodeURIComponent(LINKEDIN_REDIRECT_URI);
 
+    // NOTE: some scopes may be rejected if your LinkedIn app isn't approved.
     const scopes = [
-      "r_basicprofile",
+      "openid",
+      "profile",
+      "email",
       "w_member_social",
-      "r_organization_social",
-      "w_organization_social",
-      "rw_organization_admin",
-      "r_organization_followers",
-      "r_organization_social_feed",
-      "w_organization_social_feed",
-      "r_member_profileAnalytics",
-      "r_member_postAnalytics",
     ].join(" ");
+
 
     const url = `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${encodeURIComponent(
       LINKEDIN_CLIENT_ID
@@ -189,6 +218,7 @@ export default function LinkedInConnectClient({
         return;
       }
 
+      // ✅ keep disconnect on EC2 (as per your plan)
       const res = await fetch(`${API_BASE}/social/linkedin/disconnect`, {
         method: "POST",
         headers: {
@@ -204,7 +234,7 @@ export default function LinkedInConnectClient({
       const result = await res.json().catch(() => ({}));
 
       if (res.ok && (result as any)?.success) {
-        setUiConnected(false); // ✅ UI immediate
+        setUiConnected(false);
         setLastMessage("LinkedIn disconnected successfully!");
         setLastError(null);
         onConnected();
@@ -232,7 +262,7 @@ export default function LinkedInConnectClient({
 
   return (
     <div className="mt-5">
-      {/* ✅ Top status row (only one badge) */}
+      {/* Top status row */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span
@@ -250,7 +280,7 @@ export default function LinkedInConnectClient({
           ) : null}
         </div>
 
-        {/* ✅ Disconnect on top when connected */}
+        {/* Disconnect on top when connected */}
         {isConnected ? (
           <button
             onClick={handleDisconnect}
@@ -262,11 +292,13 @@ export default function LinkedInConnectClient({
         ) : null}
       </div>
 
-      {/* ✅ Detail box only when connected */}
+      {/* Detail box only when connected */}
       {isConnected && detail ? (
         <div className="mt-3 rounded-2xl border border-border bg-card p-3 text-xs">
           <div className="grid grid-cols-1 gap-2">
-            {detail.person_urn ? <Row label="Person URN" value={detail.person_urn} /> : null}
+            {detail.person_urn ? (
+              <Row label="Person URN" value={detail.person_urn} />
+            ) : null}
             {detail.org_urn ? <Row label="Org URN" value={detail.org_urn} /> : null}
           </div>
         </div>

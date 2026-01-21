@@ -1,9 +1,8 @@
-// src/app/connect/ConnectClient.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { apiFetch } from "@/lib/api";  // ← New import
+import { apiFetch } from "@/lib/api";
 import LinkedInConnectClient from "./linkedin/LinkedInConnectClient";
 
 type SocialDetail = Record<string, any> | null;
@@ -39,7 +38,7 @@ function getAppUser(profile?: ProfileLite | null) {
   );
 }
 
-// Instagram (FB dialog/oauth) — same as you had
+// Instagram (FB dialog/oauth)
 function buildInstagramAuthUrl(appUser: string) {
   const clientId = process.env.NEXT_PUBLIC_INSTAGRAM_CLIENT_ID || "";
   const redirectUri = process.env.NEXT_PUBLIC_INSTAGRAM_REDIRECT_URI || "";
@@ -113,7 +112,7 @@ export default function ConnectClient({ profile }: { profile: ProfileLite | null
     facebook: { connected: false, detail: null as SocialDetail },
   });
 
-  // Optimistic UI so badge doesn’t show "Not connected" immediately after callback
+  // Optimistic UI
   const [igUiConnected, setIgUiConnected] = useState(false);
   const [fbUiConnected, setFbUiConnected] = useState(false);
 
@@ -142,30 +141,32 @@ export default function ConnectClient({ profile }: { profile: ProfileLite | null
 
     setLoading(true);
     try {
-      const data = await apiFetch("/user/social_status", {
+      const data = (await apiFetch("/user/social_status", {
         method: "GET",
         token,
         query: { app_user: appUser },
-      });
+      })) as SocialStatusResponse;
+
+      const connectedMap = (data as any)?.connected || {};
 
       const next = {
         instagram: {
-          connected: Boolean(data.instagram?.connected),
-          detail: data.instagram?.detail || null,
+          connected: Boolean(connectedMap.instagram),
+          detail: (data as any)?.connected_details?.instagram || null,
         },
         linkedin: {
-          connected: Boolean(data.linkedin?.connected),
-          detail: data.linkedin?.detail || null,
+          connected: Boolean(connectedMap.linkedin),
+          detail: (data as any)?.connected_details?.linkedin || null,
         },
         facebook: {
-          connected: Boolean(data.facebook?.connected),
-          detail: data.facebook?.detail || null,
+          connected: Boolean(connectedMap.facebook),
+          detail: (data as any)?.connected_details?.facebook || null,
         },
       };
 
+
       setSocial(next);
 
-      // Reset optimistic flags if backend confirms
       if (next.instagram.connected) setIgUiConnected(false);
       if (next.facebook.connected) setFbUiConnected(false);
     } catch (e: any) {
@@ -181,10 +182,25 @@ export default function ConnectClient({ profile }: { profile: ProfileLite | null
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appUser]);
 
-  // Listen to popup callbacks (instagram_callback/facebook_callback/linkedin_callback)
+  // ✅ Listen to popup callbacks
   useEffect(() => {
     const handler = (event: MessageEvent) => {
-      const msg = event.data;
+      let msg: any = event.data;
+
+      console.log("[ConnectClient] message event:", {
+        origin: event.origin,
+        data: msg,
+      });
+
+      // accept stringified json also
+      if (typeof msg === "string") {
+        try {
+          msg = JSON.parse(msg);
+        } catch {
+          return;
+        }
+      }
+
       if (!msg || typeof msg !== "object" || !msg.type) return;
 
       if (msg.type === "instagram_callback") {
@@ -210,7 +226,11 @@ export default function ConnectClient({ profile }: { profile: ProfileLite | null
       }
 
       if (msg.type === "linkedin_callback") {
-        setToast(msg.success ? "✅ LinkedIn connected!" : `❌ LinkedIn: ${msg.error || "Connection failed"}`);
+        setToast(
+          msg.success
+            ? "✅ LinkedIn connected!"
+            : `❌ LinkedIn: ${msg.error || "Connection failed"}`
+        );
         fetchSocialStatus();
       }
     };
@@ -244,12 +264,14 @@ export default function ConnectClient({ profile }: { profile: ProfileLite | null
         </div>
       )}
 
-      {/* Profile summary (only from local/profile prop, no backend call) */}
+      {/* Profile summary */}
       <div className="mb-6 rounded-3xl border border-border bg-background p-5">
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="text-sm text-muted-foreground">Logged in as</div>
-            <div className="mt-1 text-lg font-semibold">{profile?.username || "—"}</div>
+            <div className="mt-1 text-lg font-semibold">
+              {profile?.username || "—"}
+            </div>
             <div className="mt-1 text-sm text-muted-foreground">
               {profile?.email || ""}
               {profile?.business_type ? ` • ${profile.business_type}` : ""}
@@ -359,7 +381,7 @@ export default function ConnectClient({ profile }: { profile: ProfileLite | null
             {isInstagramConnected ? "Reconnect" : "Connect"}
           </button>
 
-          {!!social.instagram.detail?.username && (
+          {!!(social.instagram.detail as any)?.username && (
             <div className="mt-2 text-xs text-muted-foreground">
               @{(social.instagram.detail as any).username}
             </div>
@@ -394,7 +416,7 @@ export default function ConnectClient({ profile }: { profile: ProfileLite | null
             {isFacebookConnected ? "Reconnect" : "Connect"}
           </button>
 
-          {!!social.facebook.detail?.page_name && (
+          {!!(social.facebook.detail as any)?.page_name && (
             <div className="mt-2 text-xs text-muted-foreground">
               Page: {(social.facebook.detail as any).page_name}
             </div>

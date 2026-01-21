@@ -1,153 +1,199 @@
-// src/app/connect/instagram/page.tsx
 "use client";
 
-import { useEffect, useState, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import React, { useEffect, useMemo, useState } from "react";
 
-type CallbackStatus = "processing" | "success" | "error";
+type CallbackMessage = {
+  type: "instagram_callback";
+  success: boolean;
+  instagram_username?: string;
+  instagram_user_id?: string;
+  message?: string;
+  error?: string;
+  app_user?: string;
+};
 
-function InstagramCallbackInner() {
-  const searchParams = useSearchParams();
-  const [status, setStatus] = useState<CallbackStatus>("processing");
-  const [message, setMessage] = useState("Connecting to Instagram...");
+type Props = {
+  appUser: string;
+  connected: boolean;
+  onConnected: () => void;
+  connectionDetails?: any;
+};
+
+const INSTAGRAM_CLIENT_ID =
+  process.env.NEXT_PUBLIC_INSTAGRAM_CLIENT_ID || "23985206087742789";
+
+// ✅ Your Lambda callback endpoint
+const INSTAGRAM_REDIRECT_URI =
+  "https://vpgqg4a4tk.execute-api.ap-south-1.amazonaws.com/prod/social/instagram/callback";
+
+export default function InstagramConnectPage({
+  appUser,
+  connected,
+  onConnected,
+  connectionDetails,
+}: Props) {
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [uiConnected, setUiConnected] = useState(false);
+  const [lastMessage, setLastMessage] = useState<string | null>(null);
+  const [lastError, setLastError] = useState<string | null>(null);
+
+  const detail = connectionDetails?.detail || null;
+  const isConnected = connected || uiConnected;
+
+  const modeLabel = useMemo(() => {
+    if (!isConnected) return null;
+    if (detail?.username) return `@${detail.username}`;
+    return "Instagram Business";
+  }, [isConnected, detail?.username]);
 
   useEffect(() => {
-    const run = async () => {
-      const code = searchParams.get("code");
-      const state = searchParams.get("state");
-      const error = searchParams.get("error");
-      const errorDescription = searchParams.get("error_description");
+    if (connected) setUiConnected(false);
+    if (!isConnected) setLastMessage(null);
+  }, [connected, isConnected]);
 
-      if (!code || !state) {
-        if (error) {
-          const errMsg = errorDescription || error;
-          setStatus("error");
-          setMessage(errMsg);
-        } else {
-          setStatus("error");
-          setMessage("Missing code/state from Instagram");
+  useEffect(() => {
+    const handler = (event: MessageEvent) => {
+      let data: any = event.data;
+      if (typeof data === "string") {
+        try {
+          data = JSON.parse(data);
+        } catch {
+          return;
         }
-
-        if (window.opener) {
-          window.opener.postMessage(
-            {
-              type: "instagram_callback",
-              success: false,
-              error: !code || !state ? "Missing code/state" : "Unknown error",
-            },
-            "*"
-          );
-          setTimeout(() => window.close(), 1500);
-        }
-        return;
       }
 
-      try {
-        setMessage("Exchanging authorization code...");
-        const apiUrl =
-          process.env.NEXT_PUBLIC_API_BASE_URL || "http://13.233.45.167:5000";
+      const msg = data as CallbackMessage;
+      if (!msg || msg.type !== "instagram_callback") return;
 
-        const resp = await fetch(`${apiUrl}/social/instagram/callback`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ code, state }),
-        });
+      setIsConnecting(false);
 
-        const result = await resp.json();
-
-        if (result?.success) {
-          setStatus("success");
-          setMessage(
-            `Connected Instagram: @${result.instagram_username || "your account"}`
-          );
-
-          if (window.opener) {
-            window.opener.postMessage(
-              {
-                type: "instagram_callback",
-                success: true,
-                instagram_username: result.instagram_username,
-                instagram_user_id: result.instagram_user_id,
-                app_user: state,
-              },
-              "*"
-            );
-            setTimeout(() => window.close(), 1200);
-          }
-        } else {
-          setStatus("error");
-          setMessage(result?.error || "Connection failed");
-
-          if (window.opener) {
-            window.opener.postMessage(
-              {
-                type: "instagram_callback",
-                success: false,
-                error: result?.error || "Connection failed",
-              },
-              "*"
-            );
-            setTimeout(() => window.close(), 1500);
-          }
-        }
-      } catch (e: any) {
-        setStatus("error");
-        setMessage("Network error. Please try again.");
-
-        if (window.opener) {
-          window.opener.postMessage(
-            {
-              type: "instagram_callback",
-              success: false,
-              error: "Network error",
-            },
-            "*"
-          );
-          setTimeout(() => window.close(), 1500);
-        }
+      if (msg.success) {
+        setLastError(null);
+        setLastMessage(msg.message || "Instagram connected successfully!");
+        setUiConnected(true);
+        onConnected();
+      } else {
+        setLastMessage(null);
+        setLastError(msg.error || "Instagram connect failed");
+        setUiConnected(false);
       }
     };
 
-    run();
-  }, [searchParams]);
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, [onConnected]);
+
+  const handleConnect = () => {
+    if (!appUser) {
+      alert("User not found. Please login again.");
+      window.location.href = "/login";
+      return;
+    }
+
+    setIsConnecting(true);
+    setLastMessage(null);
+    setLastError(null);
+    setUiConnected(false);
+
+    const scopes = [
+      "pages_show_list",
+      "pages_read_engagement",
+      "instagram_basic",
+      "instagram_content_publish",
+      "business_management",
+    ].join(",");
+
+    const url =
+      "https://www.facebook.com/v21.0/dialog/oauth" +
+      `?client_id=${encodeURIComponent(INSTAGRAM_CLIENT_ID)}` +
+      `&redirect_uri=${encodeURIComponent(INSTAGRAM_REDIRECT_URI)}` +
+      `&state=${encodeURIComponent(appUser)}` +
+      `&response_type=code` +
+      `&scope=${encodeURIComponent(scopes)}`;
+
+    const popup = window.open(
+      url,
+      "instagram-auth",
+      "width=600,height=720,scrollbars=yes,resizable=yes"
+    );
+
+    if (!popup) {
+      alert("Popup blocked. Please allow popups and try again.");
+      setIsConnecting(false);
+      return;
+    }
+
+    const checkClosed = window.setInterval(() => {
+      if (popup.closed) {
+        window.clearInterval(checkClosed);
+        setIsConnecting(false);
+        setTimeout(() => onConnected(), 700);
+      }
+    }, 800);
+  };
+
+  const handleDisconnect = async () => {
+    alert("Disconnect API not wired here yet (we will add next step).");
+  };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-black/90 p-6">
-      <div className="w-full max-w-md rounded-2xl bg-white p-8 text-center shadow-2xl">
-        <h2
-          className={`mb-4 text-2xl font-semibold ${
-            status === "success"
-              ? "text-green-600"
-              : status === "error"
-              ? "text-red-600"
-              : "text-gray-800"
-          }`}
-        >
-          {status === "processing" && "⏳ Connecting..."}
-          {status === "success" && "✅ Connected!"}
-          {status === "error" && "❌ Failed"}
-        </h2>
+    <div className="p-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span
+            className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
+              isConnected
+                ? "bg-emerald-100 text-emerald-800"
+                : "bg-gray-200 text-gray-700"
+            }`}
+          >
+            {isConnected ? "Connected" : "Not connected"}
+          </span>
 
-        {status === "processing" && (
-          <div className="mx-auto mb-6 h-12 w-12 animate-spin rounded-full border-4 border-gray-200 border-t-black" />
-        )}
+          {isConnected && modeLabel ? (
+            <span className="text-xs text-gray-500">• {modeLabel}</span>
+          ) : null}
+        </div>
 
-        <p className={`${status === "error" ? "text-red-600" : "text-gray-600"}`}>
-          {message}
-        </p>
-
-        <p className="mt-6 text-sm italic text-gray-400">
-          This window will close automatically...
-        </p>
+        {isConnected ? (
+          <button
+            onClick={handleDisconnect}
+            disabled={isConnecting}
+            className="text-xs font-medium text-red-600 hover:underline disabled:opacity-60"
+          >
+            Disconnect
+          </button>
+        ) : null}
       </div>
-    </div>
-  );
-}
 
-export default function InstagramCallbackPage() {
-  return (
-    <Suspense fallback={<div className="p-10 text-center">Loading…</div>}>
-      <InstagramCallbackInner />
-    </Suspense>
+      <button
+        onClick={isConnected ? handleDisconnect : handleConnect}
+        disabled={isConnecting}
+        className="mt-4 w-full rounded-full px-5 py-3 text-sm font-medium text-white shadow-sm transition hover:opacity-90 disabled:opacity-70"
+        style={{
+          backgroundColor: isConnected ? "#dc3545" : "#E1306C",
+          cursor: isConnecting ? "not-allowed" : "pointer",
+          border: "none",
+        }}
+      >
+        {isConnecting
+          ? isConnected
+            ? "Disconnecting..."
+            : "Connecting..."
+          : isConnected
+          ? "Disconnect"
+          : "Connect Instagram"}
+      </button>
+
+      {lastMessage ? (
+        <div className="mt-2 rounded-2xl border p-2 text-xs">✅ {lastMessage}</div>
+      ) : null}
+
+      {lastError ? (
+        <div className="mt-2 rounded-2xl border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+          ❌ {lastError}
+        </div>
+      ) : null}
+    </div>
   );
 }
