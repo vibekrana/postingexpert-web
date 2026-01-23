@@ -4,7 +4,7 @@ export function PlatformStats() {
     { name: "LinkedIn", value: "↑ 15%" },
     { name: "X", value: "↑ 10%" },
     { name: "Facebook", value: "↑ 8%" },
-  ];
+  ]; 
 
   return (
     <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
