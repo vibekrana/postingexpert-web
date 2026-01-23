@@ -8,6 +8,7 @@ import { SiteNavbar } from "@/components/site-navbar";
 import { SiteFooter } from "@/components/site-footer";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 import { clearAuth } from "@/lib/auth";
+
 // ==========================
 // 🎤 Minimal Web Speech API types (works even if TS DOM libs don't include them)
 // ==========================
@@ -60,27 +61,11 @@ type Platforms = {
   facebook: boolean;
 };
 
-<<<<<<< HEAD
-type VoiceLang = "en-IN" | "hi-IN" | "te-IN";
-
-// Web Speech API types (TS-safe)
-type SpeechRecognitionCtor = new () => SpeechRecognition;
-type SpeechRecognitionLike = SpeechRecognition;
-
-// Extend window for Chrome webkit
-declare global {
-  interface Window {
-    webkitSpeechRecognition?: SpeechRecognitionCtor;
-    SpeechRecognition?: SpeechRecognitionCtor;
-  }
-}
-=======
 type UploadItem = {
   id: string;
   file: File;
   previewUrl: string;
 };
->>>>>>> efb19e2d986c26f93632e3a04d4eec84dfaf0860
 
 export default function StudioPage() {
   const router = useRouter();
@@ -116,7 +101,6 @@ export default function StudioPage() {
     return saved === "true";
   });
 
-<<<<<<< HEAD
   // ==========================
   // 🎤 VOICE INPUT STATE
   // ==========================
@@ -124,15 +108,14 @@ export default function StudioPage() {
   const [isListening, setIsListening] = useState(false);
   const [voiceError, setVoiceError] = useState("");
 
-  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const recognitionRef = useRef<ISpeechRecognition | null>(null);
   const finalTranscriptRef = useRef<string>(""); // committed transcript
   const startedByUserRef = useRef<boolean>(false); // avoid auto restarts after stop
-=======
+
   // ✅ Upload UI (ChatGPT-style +)
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [uploads, setUploads] = useState<UploadItem[]>([]);
   const [isDragging, setIsDragging] = useState(false);
->>>>>>> efb19e2d986c26f93632e3a04d4eec84dfaf0860
 
   useEffect(() => {
     return () => {
@@ -160,7 +143,7 @@ export default function StudioPage() {
     recognition.continuous = true;
     recognition.interimResults = true;
 
-    recognition.onresult = (event: SpeechRecognitionEvent) => {
+    recognition.onresult = (event: any) => {
       let interim = "";
       let finalText = "";
 
@@ -188,7 +171,7 @@ export default function StudioPage() {
       }
     };
 
-    recognition.onerror = (e: SpeechRecognitionErrorEvent) => {
+    recognition.onerror = (e: any) => {
       // common: not-allowed, service-not-allowed, no-speech, audio-capture
       setVoiceError(`Voice error: ${e.error}`);
       setIsListening(false);
@@ -485,7 +468,7 @@ export default function StudioPage() {
       setJobId(job_id);
       setJobStatus("queued");
       setResponseMessage(
-        "✅ Request queued successfully! You’ll get updates by email."
+        "✅ Request queued successfully! You'll get updates by email."
       );
       setIsError(false);
 
@@ -594,17 +577,30 @@ export default function StudioPage() {
             </button>
           </div>
 
-<<<<<<< HEAD
-          <form
-            onSubmit={handleSubmit}
-            className="mt-8 rounded-2xl border border-border bg-card p-6"
-          >
-            <div className="space-y-5">
+          {/* Main grid */}
+          <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-3">
+            {/* Left: form */}
+            <form
+              onSubmit={handleSubmit}
+              className="lg:col-span-2 rounded-2xl border border-border bg-card p-6"
+            >
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold">Create a new job</h2>
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  disabled={isLoading}
+                  className="rounded-full border border-border bg-background px-4 py-2 text-xs font-medium hover:bg-muted disabled:opacity-60"
+                >
+                  Reset
+                </button>
+              </div>
+
               {/* Marketing Theme + Voice */}
-              <div>
+              <div className="mt-6">
                 <div className="flex items-center justify-between gap-3">
                   <label className="text-xs text-muted-foreground">
-                    Marketing Theme
+                    Marketing Theme / Prompt
                   </label>
 
                   {/* Language dropdown */}
@@ -627,14 +623,14 @@ export default function StudioPage() {
                 </div>
 
                 <div className="mt-2 flex items-center gap-3">
-                  <input
+                  <textarea
                     value={prompt}
                     onChange={(e) => {
                       setPrompt(e.target.value);
                       finalTranscriptRef.current = e.target.value; // keep voice base in sync
                     }}
-                    className="w-full rounded-xl border border-input bg-background px-4 py-3 text-sm outline-none"
-                    placeholder="E.g., Promote eco-friendly products"
+                    className="min-h-[110px] w-full resize-none rounded-2xl border border-input bg-background px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                    placeholder="Example: Launch a premium winter sale for a D2C brand. Make it bold, minimal."
                     required
                     disabled={isBusy}
                   />
@@ -660,60 +656,26 @@ export default function StudioPage() {
 
                 {/* Voice status + errors */}
                 <div className="mt-2 flex items-center justify-between">
-                  <div className="text-[11px] text-muted-foreground">
-                    {isListening ? "Listening… speak now" : "Voice input ready"}
+                  <div className="flex items-center gap-4">
+                    <div className="text-[11px] text-muted-foreground">
+                      {isListening ? "Listening… speak now" : "Voice input ready"}
+                    </div>
+                    {errors.prompt ? (
+                      <p className="text-xs text-red-500">{errors.prompt}</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Tip: include brand tone + offer + audience.
+                      </p>
+                    )}
                   </div>
-                  {voiceError && (
-                    <div className="text-[11px] text-red-500">{voiceError}</div>
-                  )}
-                </div>
-
-                {errors.prompt && (
-                  <p className="mt-2 text-xs text-red-500">{errors.prompt}</p>
-                )}
-=======
-          {/* Main grid */}
-          <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-3">
-            {/* Left: form */}
-            <form
-              onSubmit={handleSubmit}
-              className="lg:col-span-2 rounded-2xl border border-border bg-card p-6"
-            >
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold">Create a new job</h2>
-                <button
-                  type="button"
-                  onClick={handleReset}
-                  disabled={isLoading}
-                  className="rounded-full border border-border bg-background px-4 py-2 text-xs font-medium hover:bg-muted disabled:opacity-60"
-                >
-                  Reset
-                </button>
->>>>>>> efb19e2d986c26f93632e3a04d4eec84dfaf0860
-              </div>
-
-              {/* Prompt */}
-              <div className="mt-6">
-                <label className="text-xs text-muted-foreground">
-                  Marketing Theme / Prompt
-                </label>
-                <textarea
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  className="mt-2 min-h-[110px] w-full resize-none rounded-2xl border border-input bg-background px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-                  placeholder="Example: Launch a premium winter sale for a D2C brand. Make it bold, minimal, and conversion-focused."
-                />
-                <div className="mt-2 flex items-center justify-between">
-                  {errors.prompt ? (
-                    <p className="text-xs text-red-500">{errors.prompt}</p>
-                  ) : (
+                  <div className="flex items-center gap-4">
+                    {voiceError && (
+                      <div className="text-[11px] text-red-500">{voiceError}</div>
+                    )}
                     <p className="text-xs text-muted-foreground">
-                      Tip: include brand tone + offer + audience.
+                      {prompt.length}/600
                     </p>
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    {prompt.length}/600
-                  </p>
+                  </div>
                 </div>
               </div>
 
@@ -1033,7 +995,7 @@ export default function StudioPage() {
               {result?.image_urls?.length > 0 && (
                 <div className="rounded-2xl border border-border bg-card p-6">
                   <h3 className="text-sm font-semibold">Generated Images</h3>
-                  <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  <div className="mt-4 grid grid-cols-2 gap-3">
                     {result.image_urls.map((url: string, i: number) => (
                       <a
                         key={i}
@@ -1042,7 +1004,6 @@ export default function StudioPage() {
                         rel="noreferrer"
                         className="block overflow-hidden rounded-2xl border border-border bg-background hover:bg-muted"
                       >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={url}
                           alt={`Generated ${i + 1}`}
