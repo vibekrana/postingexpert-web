@@ -131,11 +131,11 @@ export default function ConnectClient({ profile }: { profile: ProfileLite | null
   const fetchSocialStatus = async () => {
     const token = getToken();
     if (!token) {
-      setToast("❌ Missing token. Please login again.");
+      setToast("Missing token. Please login again.");
       return;
     }
     if (!appUser) {
-      setToast("❌ app_user missing. Please login again.");
+      setToast("app_user missing. Please login again.");
       return;
     }
 
@@ -170,7 +170,7 @@ export default function ConnectClient({ profile }: { profile: ProfileLite | null
       if (next.instagram.connected) setIgUiConnected(false);
       if (next.facebook.connected) setFbUiConnected(false);
     } catch (e: any) {
-      setToast(`❌ Failed to fetch social status: ${e?.message || "Network error"}`);
+      setToast(`Failed to fetch social status: ${e?.message || "Network error"}`);
     } finally {
       setLoading(false);
     }
@@ -205,10 +205,10 @@ export default function ConnectClient({ profile }: { profile: ProfileLite | null
 
       if (msg.type === "instagram_callback") {
         if (msg.success) {
-          setToast("✅ Instagram connected!");
+          setToast("Instagram connected successfully");
           setIgUiConnected(true);
         } else {
-          setToast(`❌ Instagram: ${msg.error || "Connection failed"}`);
+          setToast(`Instagram error: ${msg.error || "Connection failed"}`);
           setIgUiConnected(false);
         }
         fetchSocialStatus();
@@ -216,10 +216,10 @@ export default function ConnectClient({ profile }: { profile: ProfileLite | null
 
       if (msg.type === "facebook_callback") {
         if (msg.success) {
-          setToast("✅ Facebook connected!");
+          setToast("Facebook connected successfully");
           setFbUiConnected(true);
         } else {
-          setToast(`❌ Facebook: ${msg.error || "Connection failed"}`);
+          setToast(`Facebook error: ${msg.error || "Connection failed"}`);
           setFbUiConnected(false);
         }
         fetchSocialStatus();
@@ -228,8 +228,8 @@ export default function ConnectClient({ profile }: { profile: ProfileLite | null
       if (msg.type === "linkedin_callback") {
         setToast(
           msg.success
-            ? "✅ LinkedIn connected!"
-            : `❌ LinkedIn: ${msg.error || "Connection failed"}`
+            ? "LinkedIn connected successfully"
+            : `LinkedIn error: ${msg.error || "Connection failed"}`
         );
         fetchSocialStatus();
       }
@@ -241,19 +241,19 @@ export default function ConnectClient({ profile }: { profile: ProfileLite | null
   }, [appUser]);
 
   const onInstagramConnect = () => {
-    if (!appUser) return setToast("❌ app_user missing. Login again.");
+    if (!appUser) return setToast("app_user missing. Login again.");
     const url = buildInstagramAuthUrl(appUser);
-    if (!url) return setToast("❌ Missing IG env vars (CLIENT_ID or REDIRECT_URI).");
+    if (!url) return setToast("Missing IG env vars (CLIENT_ID or REDIRECT_URI).");
     const pop = openCenteredPopup(url, "instagram_oauth");
-    if (!pop) setToast("❌ Popup blocked. Allow popups and try again.");
+    if (!pop) setToast("Popup blocked. Allow popups and try again.");
   };
 
   const onFacebookConnect = () => {
-    if (!appUser) return setToast("❌ app_user missing. Login again.");
+    if (!appUser) return setToast("app_user missing. Login again.");
     const url = buildFacebookAuthUrl(appUser);
-    if (!url) return setToast("❌ Missing FB env vars (CLIENT_ID or REDIRECT_URI).");
+    if (!url) return setToast("Missing FB env vars (CLIENT_ID or REDIRECT_URI).");
     const pop = openCenteredPopup(url, "facebook_oauth");
-    if (!pop) setToast("❌ Popup blocked. Allow popups and try again.");
+    if (!pop) setToast("Popup blocked. Allow popups and try again.");
   };
 
   return (
@@ -321,10 +321,10 @@ export default function ConnectClient({ profile }: { profile: ProfileLite | null
           </button>
 
           <button
-            onClick={() => router.push("/dashboard")}
+            onClick={() => router.push("/analytics")}
             className="rounded-full border border-border bg-background px-6 py-3 text-sm font-medium transition hover:bg-muted"
           >
-            Go to Dashboard
+            Analytics
           </button>
         </div>
       </div>
