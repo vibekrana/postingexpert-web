@@ -9,6 +9,47 @@ import { SiteFooter } from "@/components/site-footer";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 import { clearAuth } from "@/lib/auth";
 
+// ==========================
+// 🎤 Minimal Web Speech API types (works even if TS DOM libs don't include them)
+// ==========================
+type VoiceLang = "en-IN" | "hi-IN" | "te-IN";
+
+type SpeechRecognitionCtor = new () => ISpeechRecognition;
+
+interface ISpeechRecognition {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+
+  start: () => void;
+  stop: () => void;
+
+  onresult: ((event: ISpeechRecognitionEvent) => void) | null;
+  onerror: ((event: ISpeechRecognitionErrorEvent) => void) | null;
+  onend: (() => void) | null;
+}
+
+interface ISpeechRecognitionEvent {
+  resultIndex: number;
+  results: ArrayLike<ISpeechRecognitionResult>;
+}
+
+interface ISpeechRecognitionResult {
+  isFinal: boolean;
+  0: { transcript: string };
+}
+
+interface ISpeechRecognitionErrorEvent {
+  error: string;
+}
+
+declare global {
+  interface Window {
+    webkitSpeechRecognition?: SpeechRecognitionCtor;
+    SpeechRecognition?: SpeechRecognitionCtor;
+  }
+}
+
 // ✅ Use API Gateway for queue endpoints (AWS way)
 const GATEWAY =
   process.env.NEXT_PUBLIC_GATEWAY_BASE_URL ||
@@ -60,6 +101,17 @@ export default function StudioPage() {
     return saved === "true";
   });
 
+  // ==========================
+  // 🎤 VOICE INPUT STATE
+  // ==========================
+  const [voiceLang, setVoiceLang] = useState<VoiceLang>("en-IN");
+  const [isListening, setIsListening] = useState(false);
+  const [voiceError, setVoiceError] = useState("");
+
+  const recognitionRef = useRef<ISpeechRecognition | null>(null);
+  const finalTranscriptRef = useRef<string>(""); // committed transcript
+  const startedByUserRef = useRef<boolean>(false); // avoid auto restarts after stop
+
   // ✅ Upload UI (ChatGPT-style +)
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [uploads, setUploads] = useState<UploadItem[]>([]);
@@ -73,6 +125,139 @@ export default function StudioPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Init SpeechRecognition once
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      setVoiceError("Voice input isn't supported in this browser. Use Chrome.");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = voiceLang;
+    recognition.continuous = true;
+    recognition.interimResults = true;
+
+    recognition.onresult = (event: any) => {
+      let interim = "";
+      let finalText = "";
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const chunk = event.results[i][0]?.transcript || "";
+        if (event.results[i].isFinal) finalText += chunk;
+        else interim += chunk;
+      }
+
+      if (finalText) {
+        finalTranscriptRef.current = (
+          (finalTranscriptRef.current || "") +
+          " " +
+          finalText
+        )
+          .replace(/\s+/g, " ")
+          .trim();
+        setPrompt(finalTranscriptRef.current);
+      } else if (interim) {
+        // show interim live while speaking
+        const live = ((finalTranscriptRef.current || "") + " " + interim)
+          .replace(/\s+/g, " ")
+          .trim();
+        setPrompt(live);
+      }
+    };
+
+    recognition.onerror = (e: any) => {
+      // common: not-allowed, service-not-allowed, no-speech, audio-capture
+      setVoiceError(`Voice error: ${e.error}`);
+      setIsListening(false);
+      startedByUserRef.current = false;
+    };
+
+    recognition.onend = () => {
+      // If user didn't explicitly stop (Chrome can end automatically), keep UI accurate
+      setIsListening(false);
+      startedByUserRef.current = false;
+    };
+
+    recognitionRef.current = recognition;
+
+    return () => {
+      try {
+        recognition.stop();
+      } catch (_) {}
+      recognitionRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Update recognition language when dropdown changes
+  useEffect(() => {
+    const r = recognitionRef.current;
+    if (!r) return;
+
+    // If currently listening, stop first, update lang, and allow user to restart
+    const wasListening = isListening;
+    if (wasListening) {
+      try {
+        r.stop();
+      } catch (_) {}
+      setIsListening(false);
+    }
+
+    r.lang = voiceLang;
+    // Do not auto restart; user controls start/stop
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceLang]);
+
+  const startVoice = () => {
+    setVoiceError("");
+
+    const r = recognitionRef.current;
+    if (!r) {
+      setVoiceError("Voice input isn't supported here. Use Chrome desktop.");
+      return;
+    }
+
+    // base transcript should append to current prompt
+    finalTranscriptRef.current = (prompt || "").trim();
+
+    try {
+      startedByUserRef.current = true;
+      r.start();
+      setIsListening(true);
+    } catch (e) {
+      // start() can throw if called twice fast
+      setVoiceError("Could not start voice input. Try again.");
+      setIsListening(false);
+      startedByUserRef.current = false;
+    }
+  };
+
+  const stopVoice = () => {
+    const r = recognitionRef.current;
+    if (!r) return;
+
+    try {
+      r.stop();
+    } catch (_) {}
+
+    setIsListening(false);
+    startedByUserRef.current = false;
+
+    // Make sure prompt is committed (remove any interim)
+    setPrompt((prev) => prev.replace(/\s+/g, " ").trim());
+    finalTranscriptRef.current = (prompt || "").replace(/\s+/g, " ").trim();
+  };
+
+  const toggleVoice = () => {
+    if (isListening) stopVoice();
+    else startVoice();
+  };
 
   const handleSelectAll = () => {
     setPlatforms({ instagram: true, linkedin: true, facebook: true });
@@ -226,6 +411,10 @@ export default function StudioPage() {
     isRetry: boolean = false
   ) => {
     e?.preventDefault();
+
+    // ✅ auto-stop voice when user submits
+    if (isListening) stopVoice();
+
     if (!(validateForm() || isRetry)) return;
 
     const userId =
@@ -249,11 +438,11 @@ export default function StudioPage() {
     setJobId(null);
 
     // NOTE: uploads are UI-only right now.
-    // If you want to send them: upload to S3 first (presigned URLs) and add `asset_urls`.
+    // If you want to send them: upload to S3 first (presigned URLs) and add `asset_urls`..
     const payload = isRetry
       ? lastPayload
       : {
-          prompt,
+          prompt: prompt.trim(),
           numImages: Number(numImages),
           contentType,
           user_id: userId,
@@ -279,7 +468,7 @@ export default function StudioPage() {
       setJobId(job_id);
       setJobStatus("queued");
       setResponseMessage(
-        "✅ Request queued successfully! You’ll get updates by email."
+        "✅ Request queued successfully! You'll get updates by email."
       );
       setIsError(false);
 
@@ -304,7 +493,11 @@ export default function StudioPage() {
   };
 
   const handleReset = () => {
+    // stop voice if running
+    if (isListening) stopVoice();
+
     setPrompt("");
+    finalTranscriptRef.current = "";
     setNumImages("");
     setContentType("");
     setPlatforms({ instagram: false, linkedin: false, facebook: false });
@@ -403,28 +596,86 @@ export default function StudioPage() {
                 </button>
               </div>
 
-              {/* Prompt */}
+              {/* Marketing Theme + Voice */}
               <div className="mt-6">
-                <label className="text-xs text-muted-foreground">
-                  Marketing Theme / Prompt
-                </label>
-                <textarea
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  className="mt-2 min-h-[110px] w-full resize-none rounded-2xl border border-input bg-background px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-                  placeholder="Example: Launch a premium winter sale for a D2C brand. Make it bold, minimal, and conversion-focused."
-                />
+                <div className="flex items-center justify-between gap-3">
+                  <label className="text-xs text-muted-foreground">
+                    Marketing Theme / Prompt
+                  </label>
+
+                  {/* Language dropdown */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-muted-foreground">
+                      Voice language
+                    </span>
+                    <select
+                      value={voiceLang}
+                      onChange={(e) => setVoiceLang(e.target.value as VoiceLang)}
+                      disabled={isBusy}
+                      className="rounded-lg border border-input bg-background px-2 py-1 text-xs outline-none disabled:opacity-60"
+                      title="Select voice language"
+                    >
+                      <option value="en-IN">English (IN)</option>
+                      <option value="hi-IN">Hindi (IN)</option>
+                      <option value="te-IN">Telugu (IN)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="mt-2 flex items-center gap-3">
+                  <textarea
+                    value={prompt}
+                    onChange={(e) => {
+                      setPrompt(e.target.value);
+                      finalTranscriptRef.current = e.target.value; // keep voice base in sync
+                    }}
+                    className="min-h-[110px] w-full resize-none rounded-2xl border border-input bg-background px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                    placeholder="Example: Launch a premium winter sale for a D2C brand. Make it bold, minimal."
+                    required
+                    disabled={isBusy}
+                  />
+
+                  {/* Mic button */}
+                  <button
+                    type="button"
+                    onClick={toggleVoice}
+                    disabled={isBusy}
+                    className={[
+                      "h-11 w-11 shrink-0 rounded-xl border border-border bg-card text-sm font-medium",
+                      "hover:bg-muted disabled:opacity-60",
+                      isListening ? "ring-2 ring-primary" : "",
+                    ].join(" ")}
+                    title={isListening ? "Stop voice input" : "Start voice input"}
+                    aria-label={
+                      isListening ? "Stop voice input" : "Start voice input"
+                    }
+                  >
+                    {isListening ? "⏹️" : "🎤"}
+                  </button>
+                </div>
+
+                {/* Voice status + errors */}
                 <div className="mt-2 flex items-center justify-between">
-                  {errors.prompt ? (
-                    <p className="text-xs text-red-500">{errors.prompt}</p>
-                  ) : (
+                  <div className="flex items-center gap-4">
+                    <div className="text-[11px] text-muted-foreground">
+                      {isListening ? "Listening… speak now" : "Voice input ready"}
+                    </div>
+                    {errors.prompt ? (
+                      <p className="text-xs text-red-500">{errors.prompt}</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Tip: include brand tone + offer + audience.
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-4">
+                    {voiceError && (
+                      <div className="text-[11px] text-red-500">{voiceError}</div>
+                    )}
                     <p className="text-xs text-muted-foreground">
-                      Tip: include brand tone + offer + audience.
+                      {prompt.length}/600
                     </p>
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    {prompt.length}/600
-                  </p>
+                  </div>
                 </div>
               </div>
 
@@ -544,6 +795,7 @@ export default function StudioPage() {
                     onChange={(e) => setNumImages(e.target.value)}
                     className="mt-2 w-full rounded-2xl border border-input bg-background px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
                     required
+                    disabled={isBusy}
                   >
                     <option value="" disabled>
                       Choose number
@@ -570,17 +822,12 @@ export default function StudioPage() {
                     onChange={(e) => setContentType(e.target.value)}
                     className="mt-2 w-full rounded-2xl border border-input bg-background px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
                     required
+                    disabled={isBusy}
                   >
                     <option value="" disabled>
                       Choose style
                     </option>
-                    {[
-                      { value: "Informative", label: "📚 Informative" },
-                      { value: "Inspirational", label: "💫 Inspirational" },
-                      { value: "Promotional", label: "🎉 Promotional" },
-                      { value: "Educational", label: "🎓 Educational" },
-                      { value: "Engaging", label: "🔥 Engaging" },
-                    ].map((t) => (
+                    {[{ value: "Informative", label: "📚 Informative" },{ value: "Inspirational", label: "💫 Inspirational" },{ value: "Promotional", label: "🎉 Promotional" },{ value: "Educational", label: "🎓 Educational" },{ value: "Engaging", label: "🔥 Engaging" }].map((t) => (
                       <option key={t.value} value={t.value}>
                         {t.label}
                       </option>
@@ -633,13 +880,11 @@ export default function StudioPage() {
                 </div>
 
                 <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
-                  {(
-                    [
-                      ["instagram", "Instagram"],
-                      ["linkedin", "LinkedIn"],
-                      ["facebook", "Facebook"],
-                    ] as const
-                  ).map(([key, label]) => (
+                  {[
+                    ["instagram", "Instagram"],
+                    ["linkedin", "LinkedIn"],
+                    ["facebook", "Facebook"],
+                  ].map(([key, label]) => (
                     <label
                       key={key}
                       className="flex items-center gap-3 rounded-2xl border border-border bg-background px-4 py-3"
@@ -751,7 +996,6 @@ export default function StudioPage() {
                         rel="noreferrer"
                         className="block overflow-hidden rounded-2xl border border-border bg-background hover:bg-muted"
                       >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={url}
                           alt={`Generated ${i + 1}`}

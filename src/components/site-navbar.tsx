@@ -49,12 +49,20 @@ export function SiteNavbar() {
 
           {/* Show Connect only when logged in (keeps your style) */}
           {authed && (
-            <Link
-              href="/connect"
-              className="rounded-full px-4 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              Connect
-            </Link>
+            <>
+              <Link
+                href="/connect"
+                className="rounded-full px-4 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                Connect
+              </Link>
+              <Link
+                href="/analytics"
+                className="rounded-full px-4 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                Analytics
+              </Link>
+            </>
           )}
         </nav>
 
@@ -78,14 +86,6 @@ export function SiteNavbar() {
             </>
           ) : (
             <>
-              {/* Optional: keep a primary CTA when logged in */}
-              <Link
-                href="/dashboard"
-                className="rounded-full px-4 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              >
-                Dashboard
-              </Link>
-
               <button
                 type="button"
                 onClick={onLogout}

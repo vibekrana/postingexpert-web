@@ -9,6 +9,7 @@ import { useRequireAuth } from "@/hooks/useRequireAuth";
 import { apiFetch } from "@/lib/api";
 import { getToken, clearAuth } from "@/lib/auth";
 import ConnectClient from "./ConnectClient";
+import AnalyticsSection from "@/components/AnalyticsSection";
 
 type Profile = {
   username?: string;
@@ -192,7 +193,7 @@ export default function ConnectPage() {
         <div className="mx-auto max-w-6xl px-6 py-14">
           {/* Header */}
           <div className="flex flex-col gap-2">
-            <p className="text-sm text-muted-foreground">Connect</p>
+            <p className="text-sm text-muted-foreground">Dashboard</p>
             <h1 className="text-3xl font-semibold tracking-tight md:text-5xl">
               Your workspace is ready.
             </h1>
@@ -248,7 +249,7 @@ export default function ConnectPage() {
               </div>
             </div>
 
-            {/* Brand assets - NOW WITH DIRECT LOGO PREVIEW */}
+            {/* Brand assets */}
             <div className="rounded-3xl border border-border bg-card p-6 shadow-sm">
               <p className="text-sm text-muted-foreground">Brand assets</p>
 
@@ -262,7 +263,6 @@ export default function ConnectPage() {
                       alt="Business Logo"
                       className="max-h-40 max-w-full rounded-lg object-contain shadow-md"
                       onError={(e) => {
-                        // Hide image and show fallback text if broken link
                         (e.target as HTMLImageElement).style.display = "none";
                         const fallback = (e.target as HTMLImageElement).nextElementSibling as HTMLElement;
                         if (fallback) fallback.classList.remove("hidden");
@@ -278,7 +278,7 @@ export default function ConnectPage() {
                       <span className="text-3xl text-muted-foreground">?</span>
                     </div>
                     <p className="text-sm text-muted-foreground italic">
-                      Upload later (we’ll guide you).
+                      Upload later (we'll guide you).
                     </p>
                   </div>
                 )}
@@ -295,8 +295,17 @@ export default function ConnectPage() {
             </div>
           </div>
 
+          
+
           {/* Connect buttons */}
           <ConnectClient profile={profile} />
+
+
+          {/* Analytics Section
+          <div className="mt-10">
+            <AnalyticsSection />
+          </div> */}
+
         </div>
 
         <SiteFooter />
